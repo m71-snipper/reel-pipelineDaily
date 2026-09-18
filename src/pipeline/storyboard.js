@@ -19,7 +19,7 @@ function generateStoryboard(words, categoryConfig) {
     return beats;
   }
   
-  let currentBeatStart = words[0].start;
+  let currentBeatStart = 0;
   const queries = categoryConfig.pexelsQueries || [categoryConfig.pexelsQuery] || ["cinematic"];
   let queryIndex = 0;
   
@@ -55,10 +55,12 @@ function generateStoryboard(words, categoryConfig) {
       // Enforce zoom_in for the hook beat for a strong opening
       const motion = isFirstBeat ? "zoom_in" : motions[beats.length % motions.length];
       
+      const beatEnd = isLastWord ? w.end : words[i + 1].start;
+      
       beats.push({
         start: currentBeatStart,
-        end: w.end,
-        duration: w.end - currentBeatStart,
+        end: beatEnd,
+        duration: beatEnd - currentBeatStart,
         text: currentBeatWords.map(bw => bw.word).join(" "),
         visualQuery: finalQuery,
         mood: categoryConfig.visualMood || "neutral",
@@ -68,7 +70,7 @@ function generateStoryboard(words, categoryConfig) {
       
       currentBeatWords = [];
       if (!isLastWord) {
-        currentBeatStart = words[i + 1].start;
+        currentBeatStart = beatEnd;
       }
     }
   }
