@@ -1,0 +1,54 @@
+name: Daily Reel Pipeline
+
+on:
+  schedule:
+    # Runs at 12:00 PM UTC every day
+    - cron: '0 12 * * *'
+  workflow_dispatch: # Allows manual trigger from GitHub UI
+
+jobs:
+  generate-and-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Pipeline (Generate Reel)
+        env:
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          JAMENDO_CLIENT_ID: ${{ secrets.JAMENDO_CLIENT_ID }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          # Whisper binaries in the repo might be for Windows (main.exe), 
+          # disabling Whisper or ensuring a Linux binary is needed for Linux runner.
+          WHISPER_ENABLED: 'false'
+        run: |
+          # Write Firebase credentials from secret
+          echo "${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}" > firebase-adminsdk.json
+          export GOOGLE_APPLICATION_CREDENTIALS=./firebase-adminsdk.json
+          
+          # Generate Reel
+          npm run test:reel
+
+      - name: Run Publish (Optional)
+        env:
+          ENABLE_PUBLISHING: ${{ secrets.ENABLE_PUBLISHING }}
+          TIKTOK_CLIENT_KEY: ${{ secrets.TIKTOK_CLIENT_KEY }}
+          TIKTOK_CLIENT_SECRET: ${{ secrets.TIKTOK_CLIENT_SECRET }}
+          FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
+          TIKTOK_REDIRECT_URI: ${{ secrets.TIKTOK_REDIRECT_URI }}
+        run: |
+          # Only runs publish flow. If ENABLE_PUBLISHING is not 'true', it will do a dry run
+          npm run test:publish
