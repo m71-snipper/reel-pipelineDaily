@@ -45,10 +45,11 @@ jobs:
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           JAMENDO_CLIENT_ID: ${{ secrets.JAMENDO_CLIENT_ID }}
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_CREDS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
           WHISPER_ENABLED: 'true'
         run: |
-          # Write Firebase credentials from secret
-          echo "${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}" > firebase-adminsdk.json
+          # Write Firebase credentials from secret safely to preserve JSON quotes
+          echo "$FIREBASE_CREDS" > firebase-adminsdk.json
           export GOOGLE_APPLICATION_CREDENTIALS=./firebase-adminsdk.json
           
           # Generate Reel
