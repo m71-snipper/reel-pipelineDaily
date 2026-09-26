@@ -64,13 +64,13 @@ function composeVideo({
 
       // Safe crop/scale animations without zoompan
       if (clip.motion === "zoom_in") {
-        filters.push(`[${i}:v]scale=1150:2044:force_original_aspect_ratio=increase,crop='max(1080, 1150-t*15)':'max(1920, 2044-t*26.6)':'(iw-ow)/2':'(ih-oh)/2',scale=1080:1920,trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
+        filters.push(`[${i}:v]scale=1150:2044:force_original_aspect_ratio=increase,crop='max(1080,1150-t*15)':'max(1920,2044-t*26.6)':'(iw-ow)/2':'(ih-oh)/2',scale=1080:1920,trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
       } else if (clip.motion === "zoom_out") {
-        filters.push(`[${i}:v]scale=1150:2044:force_original_aspect_ratio=increase,crop='min(1150, 1080+t*15)':'min(2044, 1920+t*26.6)':'(iw-ow)/2':'(ih-oh)/2',scale=1080:1920,trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
+        filters.push(`[${i}:v]scale=1150:2044:force_original_aspect_ratio=increase,crop='min(1150,1080+t*15)':'min(2044,1920+t*26.6)':'(iw-ow)/2':'(ih-oh)/2',scale=1080:1920,trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
       } else if (clip.motion === "pan_left") {
-        filters.push(`[${i}:v]scale=1200:1920:force_original_aspect_ratio=increase,crop=1080:1920:'max(0, (iw-ow)-t*20)':'(ih-oh)/2',trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
+        filters.push(`[${i}:v]scale=1200:1920:force_original_aspect_ratio=increase,crop=1080:1920:'max(0,(iw-ow)-t*20)':'(ih-oh)/2',trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
       } else if (clip.motion === "pan_right") {
-        filters.push(`[${i}:v]scale=1200:1920:force_original_aspect_ratio=increase,crop=1080:1920:'min(iw-ow, t*20)':'(ih-oh)/2',trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
+        filters.push(`[${i}:v]scale=1200:1920:force_original_aspect_ratio=increase,crop=1080:1920:'min(iw-ow,t*20)':'(ih-oh)/2',trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
       } else {
         filters.push(`[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
       }
@@ -107,9 +107,9 @@ function composeVideo({
 
     // 4. Audio Mixing (Ducking) + Global Audio Fade Out
     if (bgMusic && voiceover) {
-      filters.push(`[${musicInputIndex}:a]volume=0.3[music_vol]`);
+      filters.push(`[${musicInputIndex}:a]volume=0.3,aresample=48000,aformat=channel_layouts=stereo[music_vol]`);
       // We must use asplit because sidechaincompress consumes the sidechain input
-      filters.push(`[${voiceInputIndex}:a]volume=1.2,asplit=2[voice_vol_sc][voice_vol_mix]`);
+      filters.push(`[${voiceInputIndex}:a]volume=1.2,aresample=48000,aformat=channel_layouts=stereo,asplit=2[voice_vol_sc][voice_vol_mix]`);
       filters.push(`[music_vol][voice_vol_sc]sidechaincompress=threshold=0.03:ratio=4:attack=50:release=300[ducked_music]`);
       filters.push(`[ducked_music][voice_vol_mix]amix=inputs=2:duration=first:dropout_transition=2,afade=t=out:st=${Math.max(0, duration - 2)}:d=2[a_out]`);
     } else if (bgMusic) {
