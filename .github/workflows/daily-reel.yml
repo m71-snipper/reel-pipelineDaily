@@ -28,8 +28,8 @@ jobs:
       - name: Install Edge-TTS
         run: pip install edge-tts
 
-      - name: Install FFmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install FFmpeg and Fonts
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-liberation
 
       - name: Setup Whisper.cpp and Download Model
         run: |

@@ -6,10 +6,10 @@
 
 const PRESETS = {
   cinematic: {
-    fontName: "Montserrat",
+    fontName: "Arial",
     fontSize: 65,
-    primaryColor: "&H00C0C0C0", // Dimmed white (inactive)
-    highlightColor: "&H00FFFFFF", // Pure white (active word)
+    primaryColor: "&H00FFFFFF", // White
+    highlightColor: "&H0000FFFF", // Yellow (active word)
     outlineColor: "&H00000000", // Black
     backColor: "&H80000000", // Semi-transparent black
     bold: 1,
