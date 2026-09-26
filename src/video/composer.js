@@ -62,11 +62,11 @@ function composeVideo({
         transitionFilter += `,fade=t=in:st=0:d=0.5`;
       }
 
-      // Safe crop/scale animations without zoompan
+      // Use zoompan for zoom_in and zoom_out because crop cannot animate width/height
       if (clip.motion === "zoom_in") {
-        filters.push(`[${i}:v]scale=1150:2044:force_original_aspect_ratio=increase,crop='max(1080,1150-t*15)':'max(1920,2044-t*26.6)':'(iw-ow)/2':'(ih-oh)/2',scale=1080:1920,trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
+        filters.push(`[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,zoompan=z='min(zoom+0.0015,1.5)':d=${frames}:x='iw/2-(iw/zoom)/2':y='ih/2-(ih/zoom)/2':s=1080x1920,trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
       } else if (clip.motion === "zoom_out") {
-        filters.push(`[${i}:v]scale=1150:2044:force_original_aspect_ratio=increase,crop='min(1150,1080+t*15)':'min(2044,1920+t*26.6)':'(iw-ow)/2':'(ih-oh)/2',scale=1080:1920,trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
+        filters.push(`[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,zoompan=z='1.5-0.0015*on':d=${frames}:x='iw/2-(iw/zoom)/2':y='ih/2-(ih/zoom)/2':s=1080x1920,trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
       } else if (clip.motion === "pan_left") {
         filters.push(`[${i}:v]scale=1200:1920:force_original_aspect_ratio=increase,crop=1080:1920:'max(0,(iw-ow)-t*20)':'(ih-oh)/2',trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
       } else if (clip.motion === "pan_right") {
