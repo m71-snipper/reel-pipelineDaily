@@ -22,7 +22,10 @@ async function uploadToTempHost(filePath) {
     "https://catbox.moe/user/api.php",
     formData,
     {
-      headers: formData.getHeaders(),
+      headers: {
+        ...formData.getHeaders(),
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+      },
       maxContentLength: Infinity,
       maxBodyLength: Infinity,
     },
@@ -167,15 +170,16 @@ async function publishToFacebook(videoPath, caption) {
     // 2. Upload binary
     logger.info(`[META] Uploading binary data for FB Reel ID: ${videoId}...`);
     await withRetry(() => {
-      const fileStream = fs.createReadStream(videoPath);
+      const fileData = fs.readFileSync(videoPath);
       return axios.post(
         `https://rupload.facebook.com/video-upload/${GRAPH_API_VERSION}/${videoId}`,
-        fileStream,
+        fileData,
         {
           headers: {
             Authorization: `OAuth ${PAGE_TOKEN}`,
             offset: "0",
-            file_size: fs.statSync(videoPath).size,
+            file_size: fileData.length,
+            "Content-Length": fileData.length,
           },
           maxContentLength: Infinity,
           maxBodyLength: Infinity,

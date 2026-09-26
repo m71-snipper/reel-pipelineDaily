@@ -197,6 +197,7 @@ async function runPipeline() {
     if (quote) {
       await markGenerationFailed(quote.firestoreDocId, error.message).catch(() => {});
     }
+    throw error;
   }
 }
 
