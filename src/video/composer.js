@@ -64,9 +64,9 @@ function composeVideo({
 
       // Use zoompan for zoom_in and zoom_out because crop cannot animate width/height
       if (clip.motion === "zoom_in") {
-        filters.push(`[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,zoompan=z='min(zoom+0.0015,1.5)':d=${frames}:x='iw/2-(iw/zoom)/2':y='ih/2-(ih/zoom)/2':s=1080x1920,trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
+        filters.push(`[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,zoompan=z='min(zoom+0.0015,1.5)':d=${frames}:x='iw/2-(iw/zoom)/2':y='ih/2-(ih/zoom)/2':fps=30:s=1080x1920,trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
       } else if (clip.motion === "zoom_out") {
-        filters.push(`[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,zoompan=z='1.5-0.0015*on':d=${frames}:x='iw/2-(iw/zoom)/2':y='ih/2-(ih/zoom)/2':s=1080x1920,trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
+        filters.push(`[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,zoompan=z='1.5-0.0015*on':d=${frames}:x='iw/2-(iw/zoom)/2':y='ih/2-(ih/zoom)/2':fps=30:s=1080x1920,trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
       } else if (clip.motion === "pan_left") {
         filters.push(`[${i}:v]scale=1200:1920:force_original_aspect_ratio=increase,crop=1080:1920:'max(0,(iw-ow)-t*20)':'(ih-oh)/2',trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
       } else if (clip.motion === "pan_right") {

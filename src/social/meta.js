@@ -12,14 +12,13 @@ const BASE_URL = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
  */
 async function uploadToTempHost(filePath) {
   logger.info(
-    "[META] Uploading video to temporary host (catbox.moe) to generate public URL for Instagram...",
+    "[META] Uploading video to temporary host (uguu.se) to generate public URL for Instagram...",
   );
   const formData = new FormData();
-  formData.append("reqtype", "fileupload");
-  formData.append("fileToUpload", fs.createReadStream(filePath));
+  formData.append("files[]", fs.createReadStream(filePath));
 
   const response = await axios.post(
-    "https://catbox.moe/user/api.php",
+    "https://uguu.se/upload.php",
     formData,
     {
       headers: {
@@ -31,10 +30,11 @@ async function uploadToTempHost(filePath) {
     },
   );
 
-  const directUrl = response.data.trim();
-  if (!directUrl.startsWith("http")) {
-    throw new Error(`Failed to upload to temp host. Response: ${directUrl}`);
+  if (!response.data || !response.data.success || !response.data.files || response.data.files.length === 0) {
+    throw new Error(`Failed to upload to temp host. Response: ${JSON.stringify(response.data)}`);
   }
+
+  const directUrl = response.data.files[0].url;
 
   logger.info(`[META] Temporary public URL generated: ${directUrl}`);
   return directUrl;
