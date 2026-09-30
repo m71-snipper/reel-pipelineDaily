@@ -60,8 +60,8 @@ const PRESETS = {
     }
   },
   stoic: {
-    fontName: "Bebas Neue",
-    fontSize: 80,
+    fontName: "Arial Black",
+    fontSize: 75,
     primaryColor: "&H00A0A0A0", // Gray (inactive)
     highlightColor: "&H00FFFFFF", // Pure white (active)
     outlineColor: "&H00000000",

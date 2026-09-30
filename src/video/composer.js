@@ -66,7 +66,7 @@ function composeVideo({
       if (clip.motion === "zoom_in") {
         filters.push(`[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,zoompan=z='min(zoom+0.0015,1.5)':d=${frames}:x='iw/2-(iw/zoom)/2':y='ih/2-(ih/zoom)/2':fps=30:s=1080x1920,trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
       } else if (clip.motion === "zoom_out") {
-        filters.push(`[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,zoompan=z='1.5-0.0015*on':d=${frames}:x='iw/2-(iw/zoom)/2':y='ih/2-(ih/zoom)/2':fps=30:s=1080x1920,trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
+        filters.push(`[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,zoompan=z='max(1, 1.5-0.0015*on)':d=${frames}:x='iw/2-(iw/zoom)/2':y='ih/2-(ih/zoom)/2':fps=30:s=1080x1920,trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
       } else if (clip.motion === "pan_left") {
         filters.push(`[${i}:v]scale=1200:1920:force_original_aspect_ratio=increase,crop=1080:1920:'max(0,(iw-ow)-t*20)':'(ih-oh)/2',trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
       } else if (clip.motion === "pan_right") {
@@ -82,7 +82,7 @@ function composeVideo({
       filters.push(`${concatInputs.join('')}concat=n=${clips.length}:v=1:a=0[concated]`);
     } else {
       // If only one clip, just map it directly
-      filters.push(`[v0]copy[concated]`);
+      filters.push(`[v0]null[concated]`);
     }
 
     // 3. Apply color grading, localized overlay and subtitles
@@ -99,10 +99,8 @@ function composeVideo({
       }
     }
     
-    const brandingText = process.env.BRANDING_TEXT || "@SuperNeuron";
-
-    // Apply contrast/saturation pop, localized drawbox, configurable watermark, and subtitles + global fade-out
-    filters.push(`[concated]eq=contrast=1.1:saturation=1.15,drawbox=x=0:y=${boxY}:w=1080:h=${boxH}:color=black@0.4:t=fill,drawtext=text='${brandingText}':x=w-tw-50:y=60:fontsize=40:fontcolor=white@0.6[graded]`);
+    // Apply contrast/saturation pop, localized drawbox, and subtitles + global fade-out
+    filters.push(`[concated]eq=contrast=1.1:saturation=1.15,drawbox=x=0:y=${boxY}:w=1080:h=${boxH}:color=black@0.4:t=fill[graded]`);
     filters.push(`[graded]ass=${escapedAss},fade=t=out:st=${duration - 1.5}:d=1.5[v_out]`);
 
     // 4. Audio Mixing (Ducking) + Global Audio Fade Out
@@ -145,8 +143,9 @@ function composeVideo({
         logger.info(`[COMPOSER] Render completed successfully at ${outputPath}`);
         resolve(outputPath);
       })
-      .on("error", (err) => {
+      .on("error", (err, stdout, stderr) => {
         logger.error(`[COMPOSER] FFmpeg error: ${err.message}`);
+        if (stderr) logger.error(`[COMPOSER] FFmpeg stderr: ${stderr}`);
         reject(err);
       });
   });
