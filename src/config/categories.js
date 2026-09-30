@@ -22,12 +22,12 @@ const CATEGORIES = {
   },
   "Sigma Stoic Mindset": {
     pexels: [
-      "dark architecture",
-      "luxury car",
-      "city night",
-      "sculpture",
-      "black and white suit",
-      "gym workout black and white",
+      "gothic architecture",
+      "luxury lifestyle",
+      "city night lights",
+      "sculpture art",
+      "businessman suit",
+      "gym workout cinematic",
     ],
     music: ["phonk", "darkwave", "epic", "bass"],
     visualMood: "high contrast, intense, focused",

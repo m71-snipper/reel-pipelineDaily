@@ -54,25 +54,17 @@ function composeVideo({
     for (let i = 0; i < clips.length; i++) {
       const clip = clips[i];
       const frames = Math.ceil(clip.duration * 30);
-      let transitionFilter = "";
-      if (i < clips.length - 1) {
-        transitionFilter += `,fade=t=out:st=${clip.duration - 0.5}:d=0.5`;
-      }
-      if (i > 0) {
-        transitionFilter += `,fade=t=in:st=0:d=0.5`;
-      }
-
       // Use zoompan for zoom_in and zoom_out because crop cannot animate width/height
       if (clip.motion === "zoom_in") {
-        filters.push(`[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,zoompan=z='min(zoom+0.0015,1.5)':d=${frames}:x='iw/2-(iw/zoom)/2':y='ih/2-(ih/zoom)/2':fps=30:s=1080x1920,setsar=1,trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
+        filters.push(`[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,zoompan=z='min(zoom+0.0015,1.5)':d=${frames}:x='iw/2-(iw/zoom)/2':y='ih/2-(ih/zoom)/2':fps=30:s=1080x1920,setsar=1,trim=duration=${clip.duration},setpts=PTS-STARTPTS[v${i}]`);
       } else if (clip.motion === "zoom_out") {
-        filters.push(`[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,zoompan=z='max(1, 1.5-0.0015*on)':d=${frames}:x='iw/2-(iw/zoom)/2':y='ih/2-(ih/zoom)/2':fps=30:s=1080x1920,setsar=1,trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
+        filters.push(`[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,zoompan=z='max(1, 1.5-0.0015*on)':d=${frames}:x='iw/2-(iw/zoom)/2':y='ih/2-(ih/zoom)/2':fps=30:s=1080x1920,setsar=1,trim=duration=${clip.duration},setpts=PTS-STARTPTS[v${i}]`);
       } else if (clip.motion === "pan_left") {
-        filters.push(`[${i}:v]scale=1200:1920:force_original_aspect_ratio=increase,crop=1080:1920:'max(0,(iw-ow)-t*20)':'(ih-oh)/2',fps=30,setsar=1,trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
+        filters.push(`[${i}:v]scale=1200:1920:force_original_aspect_ratio=increase,crop=1080:1920:'max(0,(iw-ow)-t*20)':'(ih-oh)/2',fps=30,setsar=1,trim=duration=${clip.duration},setpts=PTS-STARTPTS[v${i}]`);
       } else if (clip.motion === "pan_right") {
-        filters.push(`[${i}:v]scale=1200:1920:force_original_aspect_ratio=increase,crop=1080:1920:'min(iw-ow,t*20)':'(ih-oh)/2',fps=30,setsar=1,trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
+        filters.push(`[${i}:v]scale=1200:1920:force_original_aspect_ratio=increase,crop=1080:1920:'min(iw-ow,t*20)':'(ih-oh)/2',fps=30,setsar=1,trim=duration=${clip.duration},setpts=PTS-STARTPTS[v${i}]`);
       } else {
-        filters.push(`[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1,trim=duration=${clip.duration},setpts=PTS-STARTPTS${transitionFilter}[v${i}]`);
+        filters.push(`[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1,trim=duration=${clip.duration},setpts=PTS-STARTPTS[v${i}]`);
       }
       concatInputs.push(`[v${i}]`);
     }
@@ -85,23 +77,9 @@ function composeVideo({
       filters.push(`[v0]null[concated]`);
     }
 
-    // 3. Apply color grading, localized overlay and subtitles
-    let boxY = "ih/2-300"; // Default centerish
-    let boxH = "600";
-    if (captionStyle && captionStyle.captionLayout) {
-      const pos = captionStyle.captionLayout.position;
-      if (pos === "top") {
-        boxY = "100";
-        boxH = "450";
-      } else if (pos === "bottom") {
-        boxY = "ih-600";
-        boxH = "500";
-      }
-    }
-    
-    // Apply contrast/saturation pop, localized drawbox, and subtitles + global fade-out
-    filters.push(`[concated]eq=contrast=1.1:saturation=1.15,drawbox=x=0:y=${boxY}:w=1080:h=${boxH}:color=black@0.4:t=fill[graded]`);
-    filters.push(`[graded]ass=${escapedAss},fade=t=out:st=${duration - 1.5}:d=1.5[v_out]`);
+    // Apply contrast/saturation pop, and subtitles + global fade-out
+    filters.push(`[concated]eq=contrast=1.1:saturation=1.15[graded]`);
+    filters.push(`[graded]ass=${escapedAss},fade=t=out:st=${duration - 0.5}:d=0.5[v_out]`);
 
     // 4. Audio Mixing (Ducking) + Global Audio Fade Out
     if (bgMusic && voiceover) {
