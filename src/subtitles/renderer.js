@@ -88,15 +88,22 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     // Word-level highlighting
     line.words.forEach((activeWord, index) => {
-      const startAss = toAssTime(activeWord.start);
-      // Ensure smooth highlighting by bridging gaps between words
-      const nextWord = line.words[index + 1];
-      const endAss = nextWord ? toAssTime(nextWord.start) : toAssTime(line.end);
+      let startTime = activeWord.start;
+      let nextTime = line.words[index + 1] ? line.words[index + 1].start : line.end;
+      
+      // Fix for Whisper assigning identical timestamps to fast spoken words (prevents 0-duration freeze on Linux libass)
+      if (nextTime <= startTime) {
+        nextTime = startTime + 0.1;
+      }
+
+      const startAss = toAssTime(startTime);
+      const endAss = toAssTime(nextTime);
 
       let eventText = "";
       line.words.forEach((w) => {
         if (w === activeWord) {
-          eventText += `{\\c${highlightColor}}${w.word}{\\c${primaryColor}} `;
+          // Use standard ASS format with trailing & to prevent parser freeze on strict libass versions
+          eventText += `{\\1c${highlightColor}&}${w.word}{\\1c${primaryColor}&} `;
         } else {
           eventText += `${w.word} `;
         }
