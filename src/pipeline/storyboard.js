@@ -56,6 +56,15 @@ function generateStoryboard(words, categoryConfig) {
       const motion = isFirstBeat ? "zoom_in" : motions[beats.length % motions.length];
       
       const beatEnd = isLastWord ? w.end : words[i + 1].start;
+      // Transition Policy
+      let transition = "cut";
+      if (isNextWordFar) {
+        transition = "dip";
+      } else if (beats.length % 3 === 1) {
+        transition = "crossfade";
+      } else if (beats.length % 3 === 2) {
+        transition = "cut";
+      }
       
       beats.push({
         start: currentBeatStart,
@@ -65,7 +74,7 @@ function generateStoryboard(words, categoryConfig) {
         visualQuery: finalQuery,
         mood: categoryConfig.visualMood || "neutral",
         motion: motion,
-        transition: "cut"
+        transition: transition
       });
       
       currentBeatWords = [];

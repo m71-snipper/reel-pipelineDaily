@@ -55,17 +55,38 @@ function composeVideo({
       const clip = clips[i];
       const frames = Math.ceil(clip.duration * 30);
       // Use zoompan for zoom_in and zoom_out because crop cannot animate width/height
+      let filterStr = `[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920`;
+
       if (clip.motion === "zoom_in") {
-        filters.push(`[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,zoompan=z='min(zoom+0.0015,1.5)':d=${frames}:x='iw/2-(iw/zoom)/2':y='ih/2-(ih/zoom)/2':fps=30:s=1080x1920,setsar=1,trim=duration=${clip.duration},setpts=PTS-STARTPTS[v${i}]`);
+        filterStr += `,zoompan=z='min(zoom+0.0015,1.5)':d=${frames}:x='iw/2-(iw/zoom)/2':y='ih/2-(ih/zoom)/2':fps=30:s=1080x1920`;
       } else if (clip.motion === "zoom_out") {
-        filters.push(`[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,zoompan=z='max(1, 1.5-0.0015*on)':d=${frames}:x='iw/2-(iw/zoom)/2':y='ih/2-(ih/zoom)/2':fps=30:s=1080x1920,setsar=1,trim=duration=${clip.duration},setpts=PTS-STARTPTS[v${i}]`);
+        filterStr += `,zoompan=z='max(1, 1.5-0.0015*on)':d=${frames}:x='iw/2-(iw/zoom)/2':y='ih/2-(ih/zoom)/2':fps=30:s=1080x1920`;
       } else if (clip.motion === "pan_left") {
-        filters.push(`[${i}:v]scale=1200:1920:force_original_aspect_ratio=increase,crop=1080:1920:'max(0,(iw-ow)-t*20)':'(ih-oh)/2',fps=30,setsar=1,trim=duration=${clip.duration},setpts=PTS-STARTPTS[v${i}]`);
+        filterStr = `[${i}:v]scale=1200:1920:force_original_aspect_ratio=increase,crop=1080:1920:'max(0,(iw-ow)-t*20)':'(ih-oh)/2'`;
       } else if (clip.motion === "pan_right") {
-        filters.push(`[${i}:v]scale=1200:1920:force_original_aspect_ratio=increase,crop=1080:1920:'min(iw-ow,t*20)':'(ih-oh)/2',fps=30,setsar=1,trim=duration=${clip.duration},setpts=PTS-STARTPTS[v${i}]`);
-      } else {
-        filters.push(`[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1,trim=duration=${clip.duration},setpts=PTS-STARTPTS[v${i}]`);
+        filterStr = `[${i}:v]scale=1200:1920:force_original_aspect_ratio=increase,crop=1080:1920:'min(iw-ow,t*20)':'(ih-oh)/2'`;
       }
+
+      filterStr += `,fps=30,setsar=1,trim=duration=${clip.duration},setpts=PTS-STARTPTS`;
+      
+      // Dip to black transition
+      if (clip.transition === "dip" && i < clips.length - 1) {
+        filterStr += `,fade=t=out:st=${clip.duration - 0.2}:d=0.2`;
+      }
+      if (i > 0 && clips[i-1].transition === "dip") {
+        filterStr += `,fade=t=in:st=0:d=0.2`;
+      }
+      
+      // Crossfade approximation (blur dip)
+      if (clip.transition === "crossfade" && i < clips.length - 1) {
+        filterStr += `,gblur=sigma='min(10, 10*(t-(${clip.duration - 0.15}))/0.15)':enable='gt(t, ${clip.duration - 0.15})'`;
+      }
+      if (i > 0 && clips[i-1].transition === "crossfade") {
+        filterStr += `,gblur=sigma='max(0, 10*(0.15-t)/0.15)':enable='lt(t, 0.15)'`;
+      }
+      
+      filterStr += `[v${i}]`;
+      filters.push(filterStr);
       concatInputs.push(`[v${i}]`);
     }
 
@@ -77,9 +98,12 @@ function composeVideo({
       filters.push(`[v0]null[concated]`);
     }
 
-    // Apply contrast/saturation pop, and subtitles + global fade-out
-    filters.push(`[concated]eq=contrast=1.1:saturation=1.15[graded]`);
-    filters.push(`[graded]ass=${escapedAss},fade=t=out:st=${duration - 0.5}:d=0.5[v_out]`);
+    // Apply contrast/saturation pop, and subtitles
+    // A6. Visual grading based on category/mood should be applied here. We will apply a default cinematic grade.
+    filters.push(`[concated]eq=contrast=1.05:saturation=1.10[graded]`);
+    
+    // A9. Ending: short audio fade, subtle visual fade
+    filters.push(`[graded]ass=${escapedAss},fade=t=out:st=${duration - 0.4}:d=0.4[v_out]`);
 
     // 4. Audio Mixing (Ducking) + Global Audio Fade Out
     if (bgMusic && voiceover) {

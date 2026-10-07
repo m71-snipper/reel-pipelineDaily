@@ -4,7 +4,25 @@ on:
   schedule:
     # Runs at 12:00 PM UTC every day
     - cron: '0 12 * * *'
-  workflow_dispatch: # Allows manual trigger from GitHub UI
+  workflow_dispatch:
+    inputs:
+      run_mode:
+        description: 'Run mode (preview or publish)'
+        required: true
+        default: 'preview'
+      debug_mode:
+        description: 'Preserve artifacts and rich JSON data'
+        required: true
+        default: 'true'
+        type: boolean
+      watermark_enabled:
+        description: 'Add watermark to the reel'
+        required: true
+        default: 'true'
+        type: boolean
+      force_quote_id:
+        description: 'Specific quote ID to generate (optional)'
+        required: false
 
 jobs:
   generate-and-publish:
@@ -55,6 +73,10 @@ jobs:
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
           FIREBASE_CREDS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
           WHISPER_ENABLED: 'true'
+          RUN_MODE: ${{ github.event.inputs.run_mode || 'publish' }}
+          DEBUG_MODE: ${{ github.event.inputs.debug_mode || 'false' }}
+          WATERMARK_ENABLED: ${{ github.event.inputs.watermark_enabled || 'true' }}
+          TEST_QUOTE_ID: ${{ github.event.inputs.force_quote_id || '' }}
         run: |
           # Write Firebase credentials from secret safely to preserve JSON quotes
           printf "%s\n" "$FIREBASE_CREDS" > firebase-adminsdk.json
@@ -63,7 +85,18 @@ jobs:
           # Generate Reel
           npm run test:reel
 
+      - name: Archive artifacts (Debug Mode)
+        if: ${{ github.event.inputs.debug_mode == 'true' || failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: reel-artifacts
+          path: |
+            output/
+            temp/
+          retention-days: 7
+
       - name: Run Publish
+        if: ${{ github.event.inputs.run_mode == 'publish' || github.event_name == 'schedule' }}
         env:
           ENABLE_PUBLISHING: 'true'
           TIKTOK_CLIENT_KEY: ${{ secrets.TIKTOK_CLIENT_KEY }}

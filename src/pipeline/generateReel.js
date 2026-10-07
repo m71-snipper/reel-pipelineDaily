@@ -2,11 +2,9 @@ const fs = require("fs");
 const path = require("path");
 const logger = require("../config/logger");
 
-const { selectEligibleQuote } = require("../firebase/quoteRepository");
-const {
-  finalizeReelGeneration,
-  markGenerationFailed,
-} = require("../firebase/jobRepository");
+const { fetchQuoteById } = require("../firebase/quoteRepository");
+const { getOrCreateDailyAssignment, updateAssignment } = require("../firebase/assignmentRepository");
+const { finalizeReelGeneration } = require("../firebase/jobRepository");
 const { resolveCategoryConfig } = require("../config/categories");
 const { getVideoForBeat, clearSeenVideos } = require("../providers/pexels");
 const { getBackgroundMusic } = require("../providers/jamendo");
@@ -35,11 +33,26 @@ async function runPipeline() {
   const outDir = path.join(process.cwd(), "output");
 
   let quote = null;
+  let assignment = null;
   const tempFiles = [];
 
+  const runMode = process.env.RUN_MODE || "preview";
+  logger.info(`[PIPELINE] Started with RUN_MODE=${runMode}`);
+
   try {
-    // 1. Fetch Quote
-    quote = await selectEligibleQuote();
+    // 1. Fetch Quote & Assignment
+    if (runMode === "test" && process.env.TEST_QUOTE_ID) {
+      logger.info(`[PIPELINE] Test mode with explicit quote: ${process.env.TEST_QUOTE_ID}`);
+      quote = await fetchQuoteById(process.env.TEST_QUOTE_ID);
+    } else {
+      assignment = await getOrCreateDailyAssignment();
+      quote = await fetchQuoteById(assignment.quoteId);
+      
+      if (assignment.status !== "PUBLISHED") {
+         await updateAssignment(assignment.id, { status: "GENERATING" });
+      }
+    }
+
     if (!quote) {
       logger.info("[PIPELINE] No quotes to process.");
       return;
@@ -143,23 +156,29 @@ async function runPipeline() {
     });
 
     // 10. Validation
-    const isValid = await validateReel(finalOutputPath);
-    if (!isValid) {
-      throw new Error("Video validation failed.");
+    const validationResult = await validateReel(finalOutputPath, outDir);
+    if (!validationResult.passed) {
+      throw new Error(`Video validation failed: ${validationResult.blockingIssues.join(", ")}`);
     }
 
     // 11. Finalization
     const metadata = {
       reel_id: `reel_${quote.quote_id}`,
       video_path: finalOutputPath,
-      pexels_query: config.pexelsQuery, // keeping for backwards compatibility
+      pexels_query: config.pexelsQuery, 
       clips_count: clips.length,
       music_tag: config.musicTag,
       tts_provider: "edge",
       status: "GENERATED",
     };
 
-    await finalizeReelGeneration(quote.firestoreDocId, metadata);
+    if (runMode === "publish" || runMode === "test") {
+       await finalizeReelGeneration(quote.firestoreDocId, metadata);
+    }
+
+    if (assignment) {
+       await updateAssignment(assignment.id, { status: "READY", generationAttempts: (assignment.generationAttempts || 0) + 1 });
+    }
 
     logger.info(`[PIPELINE] Reel successfully generated at ${finalOutputPath}`);
 
@@ -194,8 +213,12 @@ async function runPipeline() {
 
   } catch (error) {
     logger.error(`[PIPELINE] Fatal error: ${error.message}`);
-    if (quote) {
-      await markGenerationFailed(quote.firestoreDocId, error.message).catch(() => {});
+    if (assignment) {
+      await updateAssignment(assignment.id, { 
+         status: "GENERATION_FAILED", 
+         lastError: error.message,
+         generationAttempts: (assignment.generationAttempts || 0) + 1 
+      }).catch(() => {});
     }
     throw error;
   }

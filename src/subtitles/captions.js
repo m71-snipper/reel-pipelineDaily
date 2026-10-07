@@ -8,14 +8,14 @@ function groupCaptions(words, styleConfig = {}) {
   logger.info("[CAPTIONS] Grouping words into smart captions...");
   
   // Default bounds
-  let maxWordsPerLine = 5;
-  let maxCharsPerLine = 24;
+  let maxWordsPerLine = 4;
+  let maxCharsPerLine = 20;
 
   // Adjust bounds if font size is known
   if (styleConfig.fontSize) {
     if (styleConfig.fontSize >= 75) {
-      maxWordsPerLine = 4;
-      maxCharsPerLine = 20;
+      maxWordsPerLine = 3;
+      maxCharsPerLine = 16;
     }
   }
 
@@ -37,6 +37,7 @@ function groupCaptions(words, styleConfig = {}) {
     // Natural breaking points
     const endsWithStrongPunctuation = /[.!?]/.test(wordText);
     const endsWithWeakPunctuation = /[,;:]/.test(wordText);
+    const isNextWordFar = nextWordObj && (nextWordObj.start - wordObj.end > 0.4);
     
     // Check limits
     const isTooLong = currentChars >= maxCharsPerLine;
@@ -48,12 +49,12 @@ function groupCaptions(words, styleConfig = {}) {
     
     let shouldBreak = false;
 
-    if (endsWithStrongPunctuation) {
-      shouldBreak = true; // Always break on full stops, exclamation marks
+    if (endsWithStrongPunctuation || isNextWordFar) {
+      shouldBreak = true; // Break on full stops, exclamation marks, and natural pauses
     } else if (isTooLong || isMaxWords) {
       shouldBreak = true;
-    } else if (endsWithWeakPunctuation && currentChars > maxCharsPerLine * 0.6) {
-      // Break early on a comma if we're already past 60% of the line length
+    } else if (endsWithWeakPunctuation && currentChars > maxCharsPerLine * 0.5) {
+      // Break early on a comma if we're already past 50% of the line length
       shouldBreak = true;
     }
 

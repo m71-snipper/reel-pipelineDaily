@@ -57,6 +57,18 @@ function generateAssFile(lines, outputPath, styleConfig, author) {
   // Assuming 1080px wide canvas
   const marginLR = Math.max(0, Math.floor((1080 - (layout.maxWidth || 900)) / 2));
 
+  // Build Watermark Style dynamically
+  let watermarkStyle = "";
+  if (process.env.WATERMARK_ENABLED !== "false") {
+    const wmOpacity = parseFloat(process.env.WATERMARK_OPACITY || "0.65");
+    const alphaHex = Math.round((1 - wmOpacity) * 255).toString(16).padStart(2, "0").toUpperCase();
+    const wmMarginTop = parseInt(process.env.WATERMARK_MARGIN_TOP || "90", 10);
+    const wmMarginRight = parseInt(process.env.WATERMARK_MARGIN_RIGHT || "50", 10);
+    
+    // Style: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, ... Alignment (9 = top right), MarginL, MarginR, MarginV
+    watermarkStyle = `Style: Watermark,Arial,40,&H${alphaHex}FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,1,1,9,50,${wmMarginRight},${wmMarginTop},1`;
+  }
+
   const assHeader = `[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
@@ -67,7 +79,7 @@ WrapStyle: 1
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Main,${fontName},${fontSize},${primaryColor},&H000000FF,${outlineColor},${backColor},${bold},0,0,0,100,100,0,0,${borderStyle},${outline},${shadow},${alignment},${marginLR},${marginLR},${marginV},1
 Style: Author,${fontName},40,&H00E0E0E0,&H000000FF,${outlineColor},&H00000000,0,1,0,0,100,100,0,0,1,2,2,8,50,50,650,1
-Style: Watermark,Arial,40,&H99FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,1,1,9,50,50,60,1
+${watermarkStyle}
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -129,10 +141,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   }
 
   // Add watermark
-  const brandingText = process.env.BRANDING_TEXT || "@SuperNeuron";
-  if (brandingText) {
-    const endAss = lines.length > 0 ? toAssTime(Math.max(60, lines[lines.length-1].end + 10)) : "0:01:00.00";
-    assEvents += `Dialogue: 0,0:00:00.00,${endAss},Watermark,,0,0,0,,${brandingText}\n`;
+  if (process.env.WATERMARK_ENABLED !== "false") {
+    const brandingText = process.env.WATERMARK_TEXT || process.env.BRANDING_TEXT || "@SuperNeuron";
+    if (brandingText) {
+      const endAss = lines.length > 0 ? toAssTime(Math.max(60, lines[lines.length-1].end + 10)) : "0:01:00.00";
+      assEvents += `Dialogue: 0,0:00:00.00,${endAss},Watermark,,0,0,0,,${brandingText}\n`;
+    }
   }
 
   const fileContent = assHeader + assEvents;

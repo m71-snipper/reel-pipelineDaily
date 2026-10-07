@@ -79,6 +79,32 @@ async function selectEligibleQuote() {
   }
 }
 
+/**
+ * Fetches a specific quote by ID.
+ */
+async function fetchQuoteById(quoteId) {
+  try {
+    const doc = await db.collection(COLLECTION_NAME).doc(quoteId).get();
+    if (!doc.exists) {
+      throw new Error(`Quote ${quoteId} not found.`);
+    }
+    const data = doc.data();
+    return {
+      firestoreDocId: doc.id,
+      quote_id: data.quote_id || doc.id,
+      category: data.category,
+      quote: data.quote,
+      author: data.author,
+      is_posted: data.is_posted,
+      timestamp: data.timestamp,
+    };
+  } catch (error) {
+    logger.error(`[FIREBASE] Error fetching quote ${quoteId}:`, error);
+    throw error;
+  }
+}
+
 module.exports = {
   selectEligibleQuote,
+  fetchQuoteById
 };
