@@ -131,10 +131,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     const firstLineEnd = Math.min(2.0, lines[lines.length - 1].end);
     const authorStart = toAssTime(firstLineEnd);
     const authorEnd = toAssTime(lines[lines.length - 1].end);
-    // Align author slightly below center if main is center, or wherever appropriate
-    let authorAlignment = 8;
-    let authorMarginV = 1100; // default lower third
-    if (layout.position === "bottom") authorMarginV = 1500;
+    // Align author at the bottom third to avoid clashing with center captions
+    let authorMarginV = 1600; 
+    if (layout.position === "bottom") authorMarginV = 1700;
     
     // We override alignment/marginV in the event line directly for Author
     assEvents += `Dialogue: 0,${authorStart},${authorEnd},Author,,0,0,0,,{\\pos(540,${authorMarginV})}{\\fad(300,300)}- ${author}\n`;

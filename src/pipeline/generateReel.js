@@ -95,7 +95,7 @@ async function runPipeline() {
     } catch (e) {
       ttsDuration = beats[beats.length - 1].end;
     }
-    const targetDuration = Math.max(9, ttsDuration + 1.5);
+    const targetDuration = Math.max(5, ttsDuration + 1.5);
     
     // Adjust last beat duration so sum of beats covers targetDuration
     const lastBeat = beats[beats.length - 1];
