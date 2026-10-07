@@ -65,9 +65,8 @@ async function getWhisperWordTimestamps(audioPath) {
     // We output json to a file to avoid maxBuffer issues and noisy stdout parsing
     const jsonOutPath = path.resolve(__dirname, `../../output/debug_whisper_${hash}`);
     
-    // -ojf (output json full), -ml 1 (max-len doesn't strictly matter with json-full but good to enforce token-level)
-    // Wait, the user said "Do not rely on --max-len 1". So we will just use -ojf.
-    const command = `"${binPath}" -m "${modelPath}" -f "${tempWavPath}" -t ${threads} -l en -nt -ojf -of "${jsonOutPath}"`;
+    // -ojf (output json full), -ml 1 forces max-len to 1 token per segment for precise word timestamps
+    const command = `"${binPath}" -m "${modelPath}" -f "${tempWavPath}" -t ${threads} -l en -nt -ojf -ml 1 -of "${jsonOutPath}"`;
     
     await execAsync(command);
     
