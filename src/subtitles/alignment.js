@@ -71,63 +71,89 @@ function matchWhisperToQuote(whisperWords, quoteText) {
     if (w.end > maxAudioEnd) maxAudioEnd = w.end;
   }
 
-  // Pass 2: Interpolate missing times proportionally
-  // First, find contiguous blocks of nulls
-  let i = 0;
-  while (i < matched.length) {
-    if (matched[i].start === null) {
-      let blockStartIdx = i;
-      let blockEndIdx = i;
-      while (blockEndIdx < matched.length && matched[blockEndIdx].start === null) {
-        blockEndIdx++;
-      }
-      blockEndIdx--; // Last null in this block
+  // Detect if Whisper hallucinated massively (e.g. if the last valid word leaves < 30% of audio time for > 50% of the words)
+  let nullCount = matched.filter(m => m.start === null).length;
+  let whisperIsBroken = false;
+  if (nullCount > matched.length * 0.3) {
+    logger.warn(`[ALIGNMENT] Whisper output seems highly clustered/hallucinated (${nullCount}/${matched.length} words rejected). Using full proportional fallback.`);
+    whisperIsBroken = true;
+  }
 
-      // Determine the time boundaries for this block
-      let prevValidEnd = 0;
-      if (blockStartIdx > 0 && matched[blockStartIdx - 1].start !== null) {
-        prevValidEnd = matched[blockStartIdx - 1].end;
-      }
+  if (whisperIsBroken) {
+    // Total proportional fallback
+    let totalChars = 0;
+    for (let j = 0; j < matched.length; j++) {
+      totalChars += Math.max(1, matched[j].word.length);
+    }
+    let currentTime = 0.1; // small start padding
+    const availableTime = Math.max(0.5, maxAudioEnd - 0.2); // leave small buffer at end
+    for (let j = 0; j < matched.length; j++) {
+      const charCount = Math.max(1, matched[j].word.length);
+      const fraction = charCount / totalChars;
+      const dur = availableTime * fraction;
+      matched[j].start = currentTime;
+      matched[j].end = currentTime + dur;
+      currentTime += dur;
+    }
+  } else {
+    // Pass 2: Interpolate missing times proportionally
+    // First, find contiguous blocks of nulls
+    let i = 0;
+    while (i < matched.length) {
+      if (matched[i].start === null) {
+        let blockStartIdx = i;
+        let blockEndIdx = i;
+        while (blockEndIdx < matched.length && matched[blockEndIdx].start === null) {
+          blockEndIdx++;
+        }
+        blockEndIdx--; // Last null in this block
 
-      let nextValidStart = maxAudioEnd;
-      if (blockEndIdx < matched.length - 1 && matched[blockEndIdx + 1].start !== null) {
-        nextValidStart = matched[blockEndIdx + 1].start;
-      }
+        // Determine the time boundaries for this block
+        let prevValidEnd = 0;
+        if (blockStartIdx > 0 && matched[blockStartIdx - 1].start !== null) {
+          prevValidEnd = matched[blockStartIdx - 1].end;
+        }
 
-      // If nextValidStart is smaller than prevValidEnd, clamp it
-      if (nextValidStart < prevValidEnd) {
-        nextValidStart = prevValidEnd;
-      }
+        let nextValidStart = maxAudioEnd;
+        if (blockEndIdx < matched.length - 1 && matched[blockEndIdx + 1].start !== null) {
+          nextValidStart = matched[blockEndIdx + 1].start;
+        }
 
-      const availableTime = nextValidStart - prevValidEnd;
-      
-      // Calculate total characters in this block for proportional distribution
-      let totalChars = 0;
-      for (let j = blockStartIdx; j <= blockEndIdx; j++) {
-        totalChars += Math.max(1, matched[j].word.length);
-      }
+        // If nextValidStart is smaller than prevValidEnd, clamp it
+        if (nextValidStart < prevValidEnd) {
+          nextValidStart = prevValidEnd;
+        }
 
-      // Distribute the available time
-      let currentTime = prevValidEnd;
-      for (let j = blockStartIdx; j <= blockEndIdx; j++) {
-        const charCount = Math.max(1, matched[j].word.length);
-        const fraction = totalChars > 0 ? (charCount / totalChars) : (1 / (blockEndIdx - blockStartIdx + 1));
-        const dur = availableTime * fraction;
+        const availableTime = nextValidStart - prevValidEnd;
         
-        matched[j].start = currentTime;
-        matched[j].end = currentTime + dur;
-        currentTime += dur;
+        // Calculate total characters in this block for proportional distribution
+        let totalChars = 0;
+        for (let j = blockStartIdx; j <= blockEndIdx; j++) {
+          totalChars += Math.max(1, matched[j].word.length);
+        }
+
+        // Distribute the available time
+        let currentTime = prevValidEnd;
+        for (let j = blockStartIdx; j <= blockEndIdx; j++) {
+          const charCount = Math.max(1, matched[j].word.length);
+          const fraction = totalChars > 0 ? (charCount / totalChars) : (1 / (blockEndIdx - blockStartIdx + 1));
+          const dur = availableTime * fraction;
+          
+          matched[j].start = currentTime;
+          matched[j].end = currentTime + dur;
+          currentTime += dur;
+        }
+        
+        i = blockEndIdx + 1;
+      } else {
+        i++;
       }
-      
-      i = blockEndIdx + 1;
-    } else {
-      i++;
     }
   }
 
   // Generate alignment report
-  const coverage = Math.round((matchedCount / rawWords.length) * 100);
-  const unmatchedSource = rawWords.length - matchedCount;
+  const coverage = whisperIsBroken ? 0 : Math.round((matchedCount / rawWords.length) * 100);
+  const unmatchedSource = whisperIsBroken ? rawWords.length : rawWords.length - matchedCount;
 
   logger.info(`[ALIGNMENT-REPORT] Source Words: ${rawWords.length}, Whisper Words: ${whisperWords.length}`);
   logger.info(`[ALIGNMENT-REPORT] Matched: ${matchedCount}, Unmatched Source: ${unmatchedSource}, Coverage: ${coverage}%`);
