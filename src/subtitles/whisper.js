@@ -105,7 +105,8 @@ async function getWhisperWordTimestamps(audioPath) {
              }
              
              const text = token.text ? token.text.trim() : "";
-             if (text && !text.startsWith("[_") && !text.endsWith("_]")) {
+             // Ignore whisper special tokens like <|endoftext|>, <|startoftranscript|>, and structural tags
+             if (text && !text.startsWith("[_") && !text.endsWith("_]") && !text.startsWith("<|") && !text.endsWith("|>")) {
                words.push({
                  word: text,
                  start: startSec,

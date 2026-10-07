@@ -6,3 +6,4 @@ firebase-adminsdk.json
 .DS_Store
 models/
 bin/
+reel-artifacts/
