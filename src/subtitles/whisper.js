@@ -56,9 +56,11 @@ async function getWhisperWordTimestamps(audioPath) {
   const tempWavPath = path.resolve(__dirname, `../../output/debug_whisper_${hash}.wav`);
 
   try {
-    logger.info(`[WHISPER] Converting audio to 16kHz mono WAV for whisper.cpp...`);
+    logger.info(`[WHISPER] Converting audio to 16kHz mono WAV for whisper.cpp (with 500ms start padding)...`);
     // whisper.cpp requires 16kHz, 16-bit, mono WAV
-    await execAsync(`ffmpeg -y -i "${audioPath}" -ar 16000 -ac 1 -c:a pcm_s16le "${tempWavPath}"`);
+    // We add 500ms of leading silence (adelay) because whisper.cpp's token timestamps drift/hallucinate
+    // when speech starts exactly at 0.0s (a known cross-attention artifact).
+    await execAsync(`ffmpeg -y -i "${audioPath}" -af "adelay=500|500" -ar 16000 -ac 1 -c:a pcm_s16le "${tempWavPath}"`);
 
     logger.info(`[WHISPER] Running whisper.cpp on ${tempWavPath}...`);
     
@@ -88,10 +90,7 @@ async function getWhisperWordTimestamps(audioPath) {
           for (const token of segment.tokens) {
              // token format usually includes text, t0 (start in 10ms units), t1 (end in 10ms units)
              // or sometimes timestamps are in milliseconds depending on whisper.cpp version.
-             // We need to carefully parse them.
              
-             // whisper.cpp v1.5.4+ JSON output:
-             // token.offsets.from and token.offsets.to are in milliseconds
              let startSec = 0;
              let endSec = 0;
              
@@ -103,6 +102,10 @@ async function getWhisperWordTimestamps(audioPath) {
                startSec = (token.t0 * 10) / 1000;
                endSec = (token.t1 * 10) / 1000;
              }
+             
+             // Subtract the 500ms padding!
+             startSec = Math.max(0, startSec - 0.5);
+             endSec = Math.max(0, endSec - 0.5);
              
              const text = token.text ? token.text.trim() : "";
              // Ignore whisper special tokens like <|endoftext|>, <|startoftranscript|>, and structural tags
