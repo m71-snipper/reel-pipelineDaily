@@ -28,8 +28,15 @@ async function selectEligibleQuote() {
     for (const doc of snapshot.docs) {
       const data = doc.data();
       const status = data.generation_status;
-      // Skip if another worker has claimed it or already generated it
-      if (status === "CLAIMED" || status === "GENERATING" || status === "GENERATED") {
+      // Skip if another worker has claimed it recently or already generated it
+      if (status === "GENERATED") {
+        continue;
+      }
+      
+      const claimedAt = data.claimed_at ? new Date(data.claimed_at).getTime() : 0;
+      const now = Date.now();
+      // If it's CLAIMED or GENERATING but older than 1 hour (3600000ms), we can retry it.
+      if ((status === "CLAIMED" || status === "GENERATING") && (now - claimedAt < 3600000)) {
         continue;
       }
       selectedDoc = doc;

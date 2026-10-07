@@ -24,7 +24,7 @@ async function generateSpeech({
     }
 
     // Using python -m edge_tts in case the binary isn't in PATH
-    const command = `python -m edge_tts --text "${cleanText}" --voice ${voice} ${rateArg} --write-media "${outputPath}"`;
+    const command = `python3 -m edge_tts --text "${cleanText}" --voice ${voice} ${rateArg} --write-media "${outputPath}"`;
 
     const fullCommand = srtPath
       ? `${command} --write-subtitles "${srtPath}"`

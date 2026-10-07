@@ -57,7 +57,7 @@ jobs:
           WHISPER_ENABLED: 'true'
         run: |
           # Write Firebase credentials from secret safely to preserve JSON quotes
-          echo "$FIREBASE_CREDS" > firebase-adminsdk.json
+          printf "%s\n" "$FIREBASE_CREDS" > firebase-adminsdk.json
           export GOOGLE_APPLICATION_CREDENTIALS=./firebase-adminsdk.json
           
           # Generate Reel

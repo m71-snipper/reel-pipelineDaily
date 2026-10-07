@@ -21,9 +21,9 @@ function generateAssFile(lines, outputPath, styleConfig, author) {
 
   const fontName = styleConfig.fontName || "Arial";
   const fontSize = styleConfig.fontSize || 65;
-  const primaryColor = styleConfig.primaryColor || "&H00FFFFFF";
-  const highlightColor = styleConfig.highlightColor || "&H0000FFFF";
-  const outlineColor = styleConfig.outlineColor || "&H00000000";
+  const primaryColor = styleConfig.primaryColor || "&HFFFFFF";
+  const highlightColor = styleConfig.highlightColor || "&H00FFFF";
+  const outlineColor = styleConfig.outlineColor || "&H000000";
   const backColor = styleConfig.backColor || "&H80000000";
   const bold = styleConfig.bold || 0;
   const borderStyle = styleConfig.borderStyle || 1;
