@@ -71,9 +71,11 @@ async function getWhisperWordTimestamps(audioPath, quoteText = "") {
     const cleanPrompt = quoteText.replace(/"/g, '\\"');
     
     // -ojf (output json full), -ml 1 forces max-len to 1 token per segment for precise word timestamps
-    const command = `"${binPath}" -m "${modelPath}" -f "${tempWavPath}" -t ${threads} -l en -nt -ojf -ml 1 --prompt "${cleanPrompt}" -th 0.0 -et 0 -lpt 0 -of "${jsonOutPath}"`;
+    // We use --prompt to guide the model. (Removed python-specific flags like --temperature)
+    const command = `"${binPath}" -m "${modelPath}" -f "${tempWavPath}" -t ${threads} -l en -nt -ojf -ml 1 --prompt "${cleanPrompt}" -of "${jsonOutPath}"`;
     
-    await execAsync(command);
+    // Capture stdout/stderr just in case it fails silently again
+    const { stdout, stderr } = await execAsync(command);
     
     const expectedJsonPath = `${jsonOutPath}.json`;
     if (!fileExists(expectedJsonPath)) {
