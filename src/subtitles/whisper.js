@@ -57,10 +57,10 @@ async function getWhisperWordTimestamps(audioPath, quoteText = "") {
   const tempWavPath = path.resolve(__dirname, `../../output/debug_whisper_${hash}.wav`);
 
   try {
-    logger.info(`[WHISPER] Converting audio to 16kHz mono WAV for whisper.cpp...`);
-    // whisper.cpp requires 16kHz, 16-bit, mono WAV
-    // Removed adelay and atempo tricks as we are using robust matching and prompts now
-    await execAsync(`ffmpeg -y -i "${audioPath}" -ar 16000 -ac 1 -c:a pcm_s16le "${tempWavPath}"`);
+    logger.info(`[WHISPER] Converting audio to 16kHz mono WAV for whisper.cpp (with padding and 0.5x speed)...`);
+    // Whisper cross-attention fails on fast TTS without DTW.
+    // We strictly MUST pad the start/end and slow down by 2x to give it resolution.
+    await execAsync(`ffmpeg -y -i "${audioPath}" -af "adelay=500|500,apad=pad_dur=0.5,atempo=0.5" -ar 16000 -ac 1 -c:a pcm_s16le "${tempWavPath}"`);
 
     logger.info(`[WHISPER] Running whisper.cpp on ${tempWavPath}...`);
     
@@ -108,7 +108,9 @@ async function getWhisperWordTimestamps(audioPath, quoteText = "") {
                endSec = (token.t1 * 10) / 1000;
              }
              
-             // Removed reverse atempo and padding math since we are no longer hacking ffmpeg
+             // Reverse the atempo (speed up by 2x) then subtract the 500ms start padding
+             startSec = Math.max(0, (startSec * 0.5) - 0.5);
+             endSec = Math.max(0, (endSec * 0.5) - 0.5);
              
              const text = token.text ? token.text.trim() : "";
              // Ignore whisper special tokens like <|endoftext|>, <|startoftranscript|>, and structural tags
