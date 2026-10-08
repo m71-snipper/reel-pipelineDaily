@@ -103,10 +103,17 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       let startTime = activeWord.start;
       let nextTime = line.words[index + 1] ? line.words[index + 1].start : line.end;
       
+      // Human perception offset: highlight appears slightly before the word is spoken
+      startTime = Math.max(0, startTime - 0.03);
+
       // Fix for Whisper assigning identical timestamps to fast spoken words (prevents 0-duration freeze on Linux libass)
       if (nextTime <= startTime) {
         nextTime = startTime + 0.1;
       }
+
+      // Frame quantize (30fps) to eliminate 1-frame flickering
+      startTime = Math.round(startTime * 30) / 30;
+      nextTime = Math.round(nextTime * 30) / 30;
 
       const startAss = toAssTime(startTime);
       const endAss = toAssTime(nextTime);

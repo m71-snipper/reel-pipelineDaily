@@ -6,7 +6,7 @@ const logger = require("../config/logger");
 /**
  * Composites the final video from multiple clips with subtle motion, audio ducking, and localized overlays.
  */
-function composeVideo({
+async function composeVideo({
   clips, // Array of { path, duration, motion }
   bgMusic,
   voiceover,
@@ -15,6 +15,20 @@ function composeVideo({
   captionStyle,
   outputPath,
 }) {
+  const util = require("util");
+  const ffprobe = util.promisify(ffmpeg.ffprobe);
+
+  if (voiceover) {
+    try {
+      const meta = await ffprobe(voiceover);
+      const voiceDur = parseFloat(meta.format.duration);
+      if (voiceDur && voiceDur + 0.3 > duration) {
+        logger.warn(`[COMPOSER] Extending duration ${duration} -> ${voiceDur + 0.3}`);
+        duration = voiceDur + 0.3;
+      }
+    } catch (e) {}
+  }
+
   logger.info(
     `[COMPOSER] Starting multi-clip composition (Duration: ${duration}s, Clips: ${clips.length})...`,
   );
@@ -54,13 +68,16 @@ function composeVideo({
     for (let i = 0; i < clips.length; i++) {
       const clip = clips[i];
       const frames = Math.ceil(clip.duration * 30);
+      const isVideo = clip.path.toLowerCase().endsWith(".mp4") || clip.path.toLowerCase().endsWith(".webm");
+      const zoomDuration = isVideo ? 1 : frames;
+
       // Use zoompan for zoom_in and zoom_out because crop cannot animate width/height
       let filterStr = `[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920`;
 
       if (clip.motion === "zoom_in") {
-        filterStr += `,zoompan=z='min(zoom+0.0015,1.5)':d=${frames}:x='iw/2-(iw/zoom)/2':y='ih/2-(ih/zoom)/2':fps=30:s=1080x1920`;
+        filterStr += `,zoompan=z='min(1.5,1+0.0015*on)':d=${zoomDuration}:x='iw/2-(iw/zoom)/2':y='ih/2-(ih/zoom)/2':fps=30:s=1080x1920`;
       } else if (clip.motion === "zoom_out") {
-        filterStr += `,zoompan=z='max(1, 1.5-0.0015*on)':d=${frames}:x='iw/2-(iw/zoom)/2':y='ih/2-(ih/zoom)/2':fps=30:s=1080x1920`;
+        filterStr += `,zoompan=z='max(1, 1.5-0.0015*on)':d=${zoomDuration}:x='iw/2-(iw/zoom)/2':y='ih/2-(ih/zoom)/2':fps=30:s=1080x1920`;
       } else if (clip.motion === "pan_left") {
         filterStr = `[${i}:v]scale=1200:1920:force_original_aspect_ratio=increase,crop=1080:1920:'max(0,(iw-ow)-t*20)':'(ih-oh)/2'`;
       } else if (clip.motion === "pan_right") {

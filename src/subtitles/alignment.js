@@ -1,121 +1,184 @@
 const logger = require("../config/logger");
 const { getWhisperWordTimestamps } = require("./whisper");
+const ffmpeg = require("fluent-ffmpeg");
+const util = require("util");
+const ffprobe = util.promisify(ffmpeg.ffprobe);
 
-// VTT fallback parsing removed as per requirements
+async function getAudioFacts(audioPath) {
+  const facts = { duration: 5, speechStart: 0, speechEnd: 5 };
+  try {
+    const meta = await ffprobe(audioPath);
+    facts.duration = parseFloat(meta.format.duration) || 5;
+    facts.speechEnd = facts.duration;
+  } catch (e) {
+    return facts;
+  }
 
-/**
- * Matches whisper output tokens to the original quote text.
- * Falls back to strict estimation only in development.
- */
-function matchWhisperToQuote(whisperWords, quoteText) {
+  await new Promise((resolve) => {
+    let pendingSilenceStart = null;
+    let firstChecked = false;
+
+    ffmpeg(audioPath)
+      .audioFilters("silencedetect=noise=-35dB:d=0.25")
+      .format("null")
+      .output("-")
+      .on("stderr", (line) => {
+        const s = line.match(/silence_start:\s*([\d.]+)/);
+        const e = line.match(/silence_end:\s*([\d.]+)/);
+        if (s) pendingSilenceStart = parseFloat(s[1]);
+        if (e) {
+          if (!firstChecked) {
+            // initial silence -> speech yahan se start hoti hai
+            if (pendingSilenceStart !== null && pendingSilenceStart < 0.15) {
+              facts.speechStart = parseFloat(e[1]);
+            }
+            firstChecked = true;
+          }
+          pendingSilenceStart = null;
+        }
+      })
+      .on("end", () => {
+        // trailing silence (last silence_start jiska end nahi aaya)
+        if (pendingSilenceStart !== null && pendingSilenceStart > facts.speechStart + 0.2) {
+          facts.speechEnd = pendingSilenceStart;
+        }
+        resolve();
+      })
+      .on("error", () => resolve())
+      .run();
+  });
+
+  facts.speechEnd = Math.min(facts.speechEnd, facts.duration);
+  facts.speechStart = Math.min(facts.speechStart, facts.speechEnd - 0.2);
+  return facts;
+}
+
+function normWord(w) {
+  return w.toLowerCase()
+    .replace(/[’‘`]/g, "'")
+    .replace(/[^a-z0-9']/g, "")
+    .replace(/^'+|'+$/g, "");
+}
+
+function lev(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n; if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, i) => i);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j-1] + 1,
+        prev[j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+
+function wordsEqual(q, w) {
+  if (q === w) return true;
+  // ASR variants catch karo: "gonna"/"going", "dont"/"don't" etc.
+  if (q.length >= 4 && w.length >= 4) {
+    return lev(q, w) <= (Math.max(q.length, w.length) > 8 ? 2 : 1);
+  }
+  return false;
+}
+
+function matchWhisperToQuote(whisperWords, quoteText, audioFacts = null) {
+  const hardStart = audioFacts ? audioFacts.speechStart : 0;
+  const fallbackEnd = audioFacts ? audioFacts.speechEnd : null;
+  const audioDuration = audioFacts ? audioFacts.duration : null;
+
   const rawWords = quoteText.split(/\s+/).filter((w) => w.length > 0);
   const matched = [];
-  let wIndex = 0; // index in whisperWords
-
-  let matchedCount = 0;
+  let wIndex = 0, lastAcceptedEnd = -1;
+  let matchedCount = 0, realWordCount = 0, nullWordCount = 0;
 
   for (let i = 0; i < rawWords.length; i++) {
     const qWord = rawWords[i];
-    const qNorm = qWord.toLowerCase().replace(/[^\w]/g, "");
+    const qNorm = normWord(qWord);
 
     if (!qNorm) {
-      // It's just punctuation, group with previous
-      matched.push({
-        word: qWord,
-        start: null,
-        end: null,
-      });
+      // punctuation-only: baad me previous word se glue hoga (nullCount me NAHI jayega)
+      matched.push({ word: qWord, start: null, end: null, punctOnly: true });
       continue;
     }
+    realWordCount++;
 
     let found = false;
-    // Look ahead in whisper words up to a limit
-    for (let j = wIndex; j < Math.min(wIndex + 6, whisperWords.length); j++) {
-      const wWord = whisperWords[j].word;
-      const wNorm = wWord.toLowerCase().replace(/[^\w]/g, "");
+    const winEnd = Math.min(wIndex + 8, whisperWords.length);
 
-      if (wNorm && wNorm === qNorm) {
-        let wStart = whisperWords[j].start;
-        let wEnd = whisperWords[j].end;
-        
-        // Reject invalid/clustered whisper timestamps (e.g., when Whisper decoder fails and clusters them at the end)
-        if (wStart >= wEnd - 0.01) {
-          wStart = null;
-          wEnd = null;
-        }
+    for (let j = wIndex; j < winEnd; j++) {
+      const w = whisperWords[j];
+      const wNorm = normWord(w.word || "");
+      if (!wNorm || !wordsEqual(qNorm, wNorm)) continue;
+      // clustered/invalid timestamps
+      if (w.start == null || w.end == null || w.start >= w.end - 0.01) continue;
+      // hallucination back-jump guard
+      if (w.start < lastAcceptedEnd - 0.05) continue;
+      if (w.end - w.start > 3.0) continue;
 
-        matched.push({
-          word: qWord,
-          start: wStart,
-          end: wEnd,
-        });
-        wIndex = j + 1;
-        found = true;
-        matchedCount++;
-        break;
-      }
+      matched.push({ word: qWord, start: w.start, end: w.end });
+      lastAcceptedEnd = w.end;
+      wIndex = j + 1;
+      found = true;
+      matchedCount++;
+      break;
     }
 
     if (!found) {
-      matched.push({
-        word: qWord,
-        start: null,
-        end: null,
-      });
+      matched.push({ word: qWord, start: null, end: null });
+      nullWordCount++;
     }
   }
 
-  // Find the maximum end time from whisperWords to know the audio boundary
-  let maxAudioEnd = 0;
-  for (const w of whisperWords) {
-    if (w.end > maxAudioEnd) maxAudioEnd = w.end;
+  // punctuation ko previous word ke end se glue karo
+  for (let i = 0; i < matched.length; i++) {
+    if (matched[i].punctOnly && i > 0 && matched[i-1].end != null) {
+      matched[i].start = matched[i-1].end;
+      matched[i].end = matched[i-1].end;
+    }
   }
 
-  // Detect if Whisper hallucinated massively (e.g. if the last valid word leaves < 30% of audio time for > 50% of the words)
-  let nullCount = matched.filter(m => m.start === null).length;
-  let whisperIsBroken = false;
-  if (nullCount > matched.length * 0.3) {
-    logger.warn(`[ALIGNMENT] Whisper output seems highly clustered/hallucinated (${nullCount}/${matched.length} words rejected). Using full proportional fallback.`);
-    whisperIsBroken = true;
-  }
+  const maxWhisperEnd = whisperWords.reduce((m, w) => Math.max(m, w.end || 0), 0);
+  const hardEnd = fallbackEnd ?? maxWhisperEnd;
+
+  // BROKEN detection — ab real words par based hai (punct fix)
+  let whisperIsBroken =
+    matchedCount === 0 ||
+    (realWordCount > 0 && nullWordCount / realWordCount > 0.3) ||
+    (audioDuration != null && maxWhisperEnd > audioDuration + 0.5);
 
   if (whisperIsBroken) {
-    // Total proportional fallback with Punctuation-Aware Pacing
-    let totalChars = 0;
-    let totalPauseTime = 0;
-    
+    logger.warn(`[ALIGNMENT] Whisper unreliable (${nullWordCount}/${realWordCount}). Proportional fallback.`);
+    let totalChars = 0, totalPause = 0;
     for (let j = 0; j < matched.length; j++) {
-      totalChars += Math.max(1, matched[j].word.length);
-      // Calculate expected pause time for punctuation
+      if (!matched[j].punctOnly) totalChars += Math.max(1, (normWord(matched[j].word) || "x").length);
       if (j < matched.length - 1) {
-        if (matched[j].word.endsWith(",")) {
-          totalPauseTime += 0.25;
-        } else if (matched[j].word.match(/[.!?]$/)) {
-          totalPauseTime += 0.4;
-        }
+        if (matched[j].word.endsWith(",")) totalPause += 0.25;
+        else if (/[.!?]$/.test(matched[j].word)) totalPause += 0.4;
       }
     }
-    
-    let currentTime = 0.1; // small start padding
-    // Subtract total pause time from the available distribution time
-    const availableTime = Math.max(0.5, maxAudioEnd - 0.2 - totalPauseTime); 
-    
+    // REAL speech boundaries use karo (0.1 guess nahi)
+    const spanStart = hardStart + 0.05;
+    const spanEnd = Math.max(spanStart + 0.5, hardEnd - 0.1);
+    const available = Math.max(0.5, spanEnd - spanStart - totalPause);
+
+    let t = spanStart;
     for (let j = 0; j < matched.length; j++) {
-      const charCount = Math.max(1, matched[j].word.length);
-      const fraction = charCount / totalChars;
-      const dur = availableTime * fraction;
-      
-      matched[j].start = currentTime;
-      matched[j].end = currentTime + dur;
-      currentTime += dur;
-      
-      // Inject the natural TTS pause time AFTER the word
+      if (matched[j].punctOnly) {
+        matched[j].start = j > 0 ? matched[j-1].end : t;
+        matched[j].end = matched[j].start;
+        continue;
+      }
+      const chars = Math.max(1, (normWord(matched[j].word) || "x").length);
+      const dur = available * (chars / totalChars);
+      matched[j].start = t;
+      matched[j].end = t + dur;
+      t += dur;
       if (j < matched.length - 1) {
-        if (matched[j].word.endsWith(",")) {
-          currentTime += 0.25;
-        } else if (matched[j].word.match(/[.!?]$/)) {
-          currentTime += 0.4;
-        }
+        if (matched[j].word.endsWith(",")) t += 0.25;
+        else if (/[.!?]$/.test(matched[j].word)) t += 0.4;
       }
     }
   } else {
@@ -123,21 +186,21 @@ function matchWhisperToQuote(whisperWords, quoteText) {
     // First, find contiguous blocks of nulls
     let i = 0;
     while (i < matched.length) {
-      if (matched[i].start === null) {
+      if (matched[i].start === null && !matched[i].punctOnly) {
         let blockStartIdx = i;
         let blockEndIdx = i;
-        while (blockEndIdx < matched.length && matched[blockEndIdx].start === null) {
+        while (blockEndIdx < matched.length && matched[blockEndIdx].start === null && !matched[blockEndIdx].punctOnly) {
           blockEndIdx++;
         }
         blockEndIdx--; // Last null in this block
 
         // Determine the time boundaries for this block
-        let prevValidEnd = 0;
+        let prevValidEnd = hardStart + 0.05;
         if (blockStartIdx > 0 && matched[blockStartIdx - 1].start !== null) {
           prevValidEnd = matched[blockStartIdx - 1].end;
         }
 
-        let nextValidStart = maxAudioEnd;
+        let nextValidStart = hardEnd - 0.1;
         if (blockEndIdx < matched.length - 1 && matched[blockEndIdx + 1].start !== null) {
           nextValidStart = matched[blockEndIdx + 1].start;
         }
@@ -153,10 +216,10 @@ function matchWhisperToQuote(whisperWords, quoteText) {
         let totalChars = 0;
         let localPauseTime = 0;
         for (let j = blockStartIdx; j <= blockEndIdx; j++) {
-          totalChars += Math.max(1, matched[j].word.length);
-          if (j < blockEndIdx) { // Don't add pause for the last word in the block (its delay happens implicitly via next valid start)
+          if (!matched[j].punctOnly) totalChars += Math.max(1, (normWord(matched[j].word) || "x").length);
+          if (j < blockEndIdx) { // Don't add pause for the last word in the block
             if (matched[j].word.endsWith(",")) localPauseTime += 0.25;
-            else if (matched[j].word.match(/[.!?]$/)) localPauseTime += 0.4;
+            else if (/[.!?]$/.test(matched[j].word)) localPauseTime += 0.4;
           }
         }
 
@@ -166,8 +229,13 @@ function matchWhisperToQuote(whisperWords, quoteText) {
         // Distribute the available time
         let currentTime = prevValidEnd;
         for (let j = blockStartIdx; j <= blockEndIdx; j++) {
-          const charCount = Math.max(1, matched[j].word.length);
-          const fraction = totalChars > 0 ? (charCount / totalChars) : (1 / (blockEndIdx - blockStartIdx + 1));
+          if (matched[j].punctOnly) {
+            matched[j].start = currentTime;
+            matched[j].end = currentTime;
+            continue;
+          }
+          const chars = Math.max(1, (normWord(matched[j].word) || "x").length);
+          const fraction = totalChars > 0 ? (chars / totalChars) : (1 / (blockEndIdx - blockStartIdx + 1));
           const dur = adjustedAvailableTime * fraction;
           
           matched[j].start = currentTime;
@@ -177,7 +245,7 @@ function matchWhisperToQuote(whisperWords, quoteText) {
           // Inject pause if needed
           if (j < blockEndIdx) {
             if (matched[j].word.endsWith(",")) currentTime += 0.25;
-            else if (matched[j].word.match(/[.!?]$/)) currentTime += 0.4;
+            else if (/[.!?]$/.test(matched[j].word)) currentTime += 0.4;
           }
         }
         
@@ -188,13 +256,24 @@ function matchWhisperToQuote(whisperWords, quoteText) {
     }
   }
 
-  // Generate alignment report
-  const coverage = whisperIsBroken ? 0 : Math.round((matchedCount / rawWords.length) * 100);
-  const unmatchedSource = whisperIsBroken ? rawWords.length : rawWords.length - matchedCount;
+  // FINAL safety pass: monotonic + clamp
+  for (let k = 0; k < matched.length; k++) {
+    const m = matched[k];
+    if (m.start == null) { m.start = k > 0 ? matched[k-1].end : hardStart; m.end = m.start; }
+    if (audioDuration != null) {
+      m.start = Math.max(0, Math.min(m.start, audioDuration));
+      m.end = Math.max(0, Math.min(m.end, audioDuration));
+    }
+    if (m.end < m.start) m.end = m.start;
+    if (k > 0 && m.start < matched[k-1].end) {
+      m.start = matched[k-1].end;
+      if (m.end < m.start) m.end = m.start;
+    }
+  }
 
-  logger.info(`[ALIGNMENT-REPORT] Source Words: ${rawWords.length}, Whisper Words: ${whisperWords.length}`);
-  logger.info(`[ALIGNMENT-REPORT] Matched: ${matchedCount}, Unmatched Source: ${unmatchedSource}, Coverage: ${coverage}%`);
-
+  const coverage = realWordCount > 0 ? Math.round((matchedCount / realWordCount) * 100) : 0;
+  logger.info(`[ALIGNMENT-REPORT] Matched: ${matchedCount}/${realWordCount}, Coverage: ${coverage}%${whisperIsBroken ? " (FALLBACK)" : ""}`);
+  
   if (process.env.DEBUG_MODE === "true") {
     const fs = require("fs");
     const path = require("path");
@@ -217,7 +296,7 @@ async function getWordAlignment(audioPath, text, ttsSrtPath) {
 
   let whisperWords = null;
   try {
-    whisperWords = await getWhisperWordTimestamps(audioPath);
+    whisperWords = await getWhisperWordTimestamps(audioPath, text);
   } catch (err) {
     logger.error(`[ALIGNMENT] Whisper processing failed: ${err.message}`);
     // If whisper enabled but failed, do not silently fallback
@@ -227,8 +306,9 @@ async function getWordAlignment(audioPath, text, ttsSrtPath) {
   }
 
   if (whisperWords && whisperWords.length > 0) {
-    const aligned = matchWhisperToQuote(whisperWords, text);
-    return aligned;
+    let facts = null;
+    try { facts = await getAudioFacts(audioPath); } catch (e) {}
+    return matchWhisperToQuote(whisperWords, text, facts);
   }
 
   // Fallback is only allowed if WHISPER_ENABLED is false (development fallback)
@@ -240,28 +320,17 @@ async function getWordAlignment(audioPath, text, ttsSrtPath) {
     "[ALIGNMENT] Real audio-derived timing disabled. Falling back to explicit proportional estimation for dev.",
   );
 
-  // Basic proportional fallback (only for DEV)
-  const ffmpeg = require("fluent-ffmpeg");
-  const util = require("util");
-  const ffprobe = util.promisify(ffmpeg.ffprobe);
-
-  let duration = 5;
-  try {
-    const metadata = await ffprobe(audioPath);
-    duration = metadata.format.duration;
-  } catch (e) {
-    logger.warn(
-      "[ALIGNMENT] Could not probe audio duration, assuming 5 seconds.",
-    );
-  }
-
+  let facts = null;
+  try { facts = await getAudioFacts(audioPath); } catch (e) {}
+  
+  let duration = facts ? facts.duration : 5;
   const rawWords = text.split(/\s+/).filter((w) => w.length > 0);
   const charCounts = rawWords.map((w) => w.length);
   const totalChars = charCounts.reduce((sum, count) => sum + count, 0);
 
-  let currentTime = 0.3; // small start padding
+  let currentTime = facts ? facts.speechStart + 0.05 : 0.3;
   const words = [];
-  const availableTime = Math.max(duration - 0.5, 0.5); // leave some buffer
+  const availableTime = Math.max((facts ? facts.speechEnd : duration) - currentTime - 0.1, 0.5);
 
   for (let i = 0; i < rawWords.length; i++) {
     const dur = Math.max((charCounts[i] / totalChars) * availableTime, 0.12);

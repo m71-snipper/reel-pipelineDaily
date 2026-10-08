@@ -22,9 +22,10 @@ function fileExists(filePath) {
  * Run whisper.cpp to extract word-level timestamps.
  * 
  * @param {string} audioPath The path to the source audio (usually from TTS)
+ * @param {string} quoteText The exact text spoken in the audio
  * @returns {Promise<Array<{word: string, start: number, end: number}>>}
  */
-async function getWhisperWordTimestamps(audioPath) {
+async function getWhisperWordTimestamps(audioPath, quoteText = "") {
   const isEnabled = process.env.WHISPER_ENABLED === "true";
   if (!isEnabled) {
     logger.warn("[WHISPER] Whisper is disabled via WHISPER_ENABLED.");
@@ -56,20 +57,21 @@ async function getWhisperWordTimestamps(audioPath) {
   const tempWavPath = path.resolve(__dirname, `../../output/debug_whisper_${hash}.wav`);
 
   try {
-    logger.info(`[WHISPER] Converting audio to 16kHz mono WAV for whisper.cpp (with 500ms start padding and 0.5x speed)...`);
+    logger.info(`[WHISPER] Converting audio to 16kHz mono WAV for whisper.cpp...`);
     // whisper.cpp requires 16kHz, 16-bit, mono WAV
-    // We add 500ms of leading silence (adelay) and slow the audio down by 2x (atempo=0.5).
-    // Fast TTS audio causes whisper.cpp token timestamps to bunch up. Slowing it down gives the cross-attention
-    // mechanism twice as much time to resolve word boundaries accurately!
-    await execAsync(`ffmpeg -y -i "${audioPath}" -af "adelay=500|500,atempo=0.5" -ar 16000 -ac 1 -c:a pcm_s16le "${tempWavPath}"`);
+    // Removed adelay and atempo tricks as we are using robust matching and prompts now
+    await execAsync(`ffmpeg -y -i "${audioPath}" -ar 16000 -ac 1 -c:a pcm_s16le "${tempWavPath}"`);
 
     logger.info(`[WHISPER] Running whisper.cpp on ${tempWavPath}...`);
     
     // We output json to a file to avoid maxBuffer issues and noisy stdout parsing
     const jsonOutPath = path.resolve(__dirname, `../../output/debug_whisper_${hash}`);
     
+    // Clean quote text for bash prompt injection
+    const cleanPrompt = quoteText.replace(/"/g, '\\"');
+    
     // -ojf (output json full), -ml 1 forces max-len to 1 token per segment for precise word timestamps
-    const command = `"${binPath}" -m "${modelPath}" -f "${tempWavPath}" -t ${threads} -l en -nt -ojf -ml 1 -of "${jsonOutPath}"`;
+    const command = `"${binPath}" -m "${modelPath}" -f "${tempWavPath}" -t ${threads} -l en -nt -ojf -ml 1 --prompt "${cleanPrompt}" -th 0.0 -et 0 -lpt 0 -of "${jsonOutPath}"`;
     
     await execAsync(command);
     
@@ -104,9 +106,7 @@ async function getWhisperWordTimestamps(audioPath) {
                endSec = (token.t1 * 10) / 1000;
              }
              
-             // Reverse the atempo (speed up by 2x) then subtract the 500ms padding
-             startSec = Math.max(0, (startSec * 0.5) - 0.5);
-             endSec = Math.max(0, (endSec * 0.5) - 0.5);
+             // Removed reverse atempo and padding math since we are no longer hacking ffmpeg
              
              const text = token.text ? token.text.trim() : "";
              // Ignore whisper special tokens like <|endoftext|>, <|startoftranscript|>, and structural tags
