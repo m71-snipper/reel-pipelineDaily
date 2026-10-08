@@ -80,20 +80,43 @@ function matchWhisperToQuote(whisperWords, quoteText) {
   }
 
   if (whisperIsBroken) {
-    // Total proportional fallback
+    // Total proportional fallback with Punctuation-Aware Pacing
     let totalChars = 0;
+    let totalPauseTime = 0;
+    
     for (let j = 0; j < matched.length; j++) {
       totalChars += Math.max(1, matched[j].word.length);
+      // Calculate expected pause time for punctuation
+      if (j < matched.length - 1) {
+        if (matched[j].word.endsWith(",")) {
+          totalPauseTime += 0.25;
+        } else if (matched[j].word.match(/[.!?]$/)) {
+          totalPauseTime += 0.4;
+        }
+      }
     }
+    
     let currentTime = 0.1; // small start padding
-    const availableTime = Math.max(0.5, maxAudioEnd - 0.2); // leave small buffer at end
+    // Subtract total pause time from the available distribution time
+    const availableTime = Math.max(0.5, maxAudioEnd - 0.2 - totalPauseTime); 
+    
     for (let j = 0; j < matched.length; j++) {
       const charCount = Math.max(1, matched[j].word.length);
       const fraction = charCount / totalChars;
       const dur = availableTime * fraction;
+      
       matched[j].start = currentTime;
       matched[j].end = currentTime + dur;
       currentTime += dur;
+      
+      // Inject the natural TTS pause time AFTER the word
+      if (j < matched.length - 1) {
+        if (matched[j].word.endsWith(",")) {
+          currentTime += 0.25;
+        } else if (matched[j].word.match(/[.!?]$/)) {
+          currentTime += 0.4;
+        }
+      }
     }
   } else {
     // Pass 2: Interpolate missing times proportionally
@@ -126,22 +149,36 @@ function matchWhisperToQuote(whisperWords, quoteText) {
 
         const availableTime = nextValidStart - prevValidEnd;
         
-        // Calculate total characters in this block for proportional distribution
+        // Calculate total characters and local pause time in this block for proportional distribution
         let totalChars = 0;
+        let localPauseTime = 0;
         for (let j = blockStartIdx; j <= blockEndIdx; j++) {
           totalChars += Math.max(1, matched[j].word.length);
+          if (j < blockEndIdx) { // Don't add pause for the last word in the block (its delay happens implicitly via next valid start)
+            if (matched[j].word.endsWith(",")) localPauseTime += 0.25;
+            else if (matched[j].word.match(/[.!?]$/)) localPauseTime += 0.4;
+          }
         }
+
+        // Adjust available time to account for punctuation pauses inside the block
+        let adjustedAvailableTime = Math.max(0.01, availableTime - localPauseTime);
 
         // Distribute the available time
         let currentTime = prevValidEnd;
         for (let j = blockStartIdx; j <= blockEndIdx; j++) {
           const charCount = Math.max(1, matched[j].word.length);
           const fraction = totalChars > 0 ? (charCount / totalChars) : (1 / (blockEndIdx - blockStartIdx + 1));
-          const dur = availableTime * fraction;
+          const dur = adjustedAvailableTime * fraction;
           
           matched[j].start = currentTime;
           matched[j].end = currentTime + dur;
           currentTime += dur;
+          
+          // Inject pause if needed
+          if (j < blockEndIdx) {
+            if (matched[j].word.endsWith(",")) currentTime += 0.25;
+            else if (matched[j].word.match(/[.!?]$/)) currentTime += 0.4;
+          }
         }
         
         i = blockEndIdx + 1;
