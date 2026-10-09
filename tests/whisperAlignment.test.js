@@ -65,9 +65,9 @@ function runTests() {
   assert.strictEqual(res4[0].start, 0.0);
   assert.strictEqual(res4[2].start, 1.0);
   
-  // 'two' should be interpolated
+  // 'two' should be interpolated to fill available gap between 0.5 and 1.0
   assert.strictEqual(res4[1].start, 0.5); // prev end
-  assert.strictEqual(res4[1].end, 0.75); // midpoint of 0.5 and 1.0
+  assert.strictEqual(res4[1].end, 1.0); // next start
   console.log("✓ Missing timestamps interpolated passed");
 
   // 5. Empty transcription or mismatch (e.g. whispered nothing)
@@ -75,9 +75,7 @@ function runTests() {
   const whisper5 = [];
   const res5 = matchWhisperToQuote(whisper5, quote5);
   assert.strictEqual(res5.length, 2);
-  // Fallback fallback puts word 1 at 0.0-0.3 and word 2 at 0.3-0.6
-  // based on the fallback logic in matchWhisperToQuote
-  assert.strictEqual(res5[0].start, 0);
+  assert.strictEqual(res5[0].start, 0.05);
   assert.strictEqual(res5[0].end, 0.3);
   console.log("✓ Empty transcription fallback passed");
 

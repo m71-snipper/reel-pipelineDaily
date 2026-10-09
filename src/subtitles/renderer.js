@@ -2,14 +2,16 @@ const fs = require("fs");
 const logger = require("../config/logger");
 
 /**
- * Converts HH:MM:SS.mmm to ASS format H:MM:SS.cc
+ * Converts seconds to ASS format H:MM:SS.cc with exact integer centisecond precision
  */
 function toAssTime(seconds) {
-  const date = new Date(seconds * 1000);
-  const h = Math.floor(seconds / 3600);
-  const m = String(date.getUTCMinutes()).padStart(2, "0");
-  const s = String(date.getUTCSeconds()).padStart(2, "0");
-  const cs = String(Math.floor(date.getUTCMilliseconds() / 10)).padStart(2, "0");
+  const totalCs = Math.max(0, Math.round(seconds * 100));
+  const cs = String(totalCs % 100).padStart(2, "0");
+  const totalS = Math.floor(totalCs / 100);
+  const s = String(totalS % 60).padStart(2, "0");
+  const totalM = Math.floor(totalS / 60);
+  const m = String(totalM % 60).padStart(2, "0");
+  const h = Math.floor(totalM / 60);
   return `${h}:${m}:${s}.${cs}`;
 }
 
@@ -39,18 +41,19 @@ function generateAssFile(lines, outputPath, styleConfig, author) {
 
   let alignment = 5; // default center
   let marginV = 0;
+  let posY = 960; // 1920 / 2 default middle center
   if (layout.position === "top") {
     alignment = 8;
     marginV = layout.marginTop || 200;
+    posY = marginV;
   } else if (layout.position === "bottom") {
     alignment = 2;
     marginV = layout.marginBottom || 300;
+    posY = 1920 - marginV;
   } else {
     alignment = 5;
-    // For center, marginV can offset vertically, but usually 0 is true center.
-    // If presets specify a marginV for center, we can use it to slightly push up/down,
-    // though ASS center alignment ignores it in some renderers.
-    marginV = 0; 
+    marginV = 0;
+    posY = 960;
   }
 
   // Calculate side margins for max width
@@ -87,6 +90,24 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
   let assEvents = "";
 
+  // Sanitize line boundaries to guarantee zero temporal overlap between consecutive lines
+  for (let l = 0; l < lines.length; l++) {
+    const currentLine = lines[l];
+    const nextLine = lines[l + 1];
+
+    if (currentLine.words && currentLine.words.length > 0) {
+      currentLine.start = currentLine.words[0].start;
+      currentLine.end = Math.max(currentLine.start + 0.05, currentLine.words[currentLine.words.length - 1].end);
+    }
+
+    if (nextLine) {
+      const nextStart = (nextLine.words && nextLine.words.length > 0) ? nextLine.words[0].start : nextLine.start;
+      if (currentLine.end > nextStart) {
+        currentLine.end = nextStart;
+      }
+    }
+  }
+
   // Add the dynamic captions
   lines.forEach((line) => {
     // If we only have plain text without words alignment array (fallback)
@@ -94,34 +115,41 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       const startAss = toAssTime(line.start);
       const endAss = toAssTime(line.end);
       const text = line.text.replace(/\n/g, "\\N");
-      assEvents += `Dialogue: 0,${startAss},${endAss},Main,,0,0,0,,${text}\n`;
+      assEvents += `Dialogue: 0,${startAss},${endAss},Main,,0,0,0,,{\\an${alignment}\\pos(540,${posY})}${text}\n`;
       return;
     }
 
-    // Word-level highlighting
-    line.words.forEach((activeWord, index) => {
-      let startTime = activeWord.start;
-      let nextTime = line.words[index + 1] ? line.words[index + 1].start : line.end;
-      
-      // Human perception offset: highlight appears slightly before the word is spoken
-      startTime = Math.max(0, startTime - 0.03);
-
-      // Fix for Whisper assigning identical timestamps to fast spoken words (prevents 0-duration freeze on Linux libass)
-      if (nextTime <= startTime) {
-        nextTime = startTime + 0.1;
+    const N = line.words.length;
+    // Compute contiguous, strictly non-overlapping partition boundaries [t_0, t_1, ..., t_N]
+    // where slicePoints[0] = line.start, slicePoints[N] = line.end
+    const slicePoints = [line.start];
+    for (let i = 1; i < N; i++) {
+      const minPossible = slicePoints[i - 1] + 0.03;
+      const maxPossible = line.end - 0.03 * (N - i);
+      let pt = line.words[i].start;
+      if (maxPossible >= minPossible) {
+        pt = Math.max(minPossible, Math.min(maxPossible, pt));
+      } else {
+        pt = minPossible;
       }
+      slicePoints.push(pt);
+    }
+    slicePoints.push(line.end);
 
-      // Frame quantize (30fps) to eliminate 1-frame flickering
-      startTime = Math.round(startTime * 30) / 30;
-      nextTime = Math.round(nextTime * 30) / 30;
+    // Word-level highlighting without duplicate events or collision shifts
+    for (let i = 0; i < N; i++) {
+      const activeWord = line.words[i];
+      const startTime = slicePoints[i];
+      const endTime = slicePoints[i + 1];
+
+      if (endTime <= startTime) continue;
 
       const startAss = toAssTime(startTime);
-      const endAss = toAssTime(nextTime);
+      const endAss = toAssTime(endTime);
 
       let eventText = "";
       line.words.forEach((w) => {
         if (w === activeWord) {
-          // Use standard ASS format with trailing & to prevent parser freeze on strict libass versions
           eventText += `{\\1c${highlightColor}&}${w.word}{\\1c${primaryColor}&} `;
         } else {
           eventText += `${w.word} `;
@@ -129,8 +157,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       });
 
       eventText = eventText.trim().replace(/\n/g, "\\N");
-      assEvents += `Dialogue: 0,${startAss},${endAss},Main,,0,0,0,,${eventText}\n`;
-    });
+      // \pos tag anchors text at exact coordinates, preventing libass collision jumping
+      assEvents += `Dialogue: 0,${startAss},${endAss},Main,,0,0,0,,{\\an${alignment}\\pos(540,${posY})}${eventText}\n`;
+    }
   });
 
   // Add the author (appears after first few seconds, stays till end)

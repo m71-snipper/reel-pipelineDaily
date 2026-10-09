@@ -57,24 +57,21 @@ async function getWhisperWordTimestamps(audioPath, quoteText = "") {
   const tempWavPath = path.resolve(__dirname, `../../output/debug_whisper_${hash}.wav`);
 
   try {
-    logger.info(`[WHISPER] Converting audio to 16kHz mono WAV for whisper.cpp (with padding and 0.5x speed)...`);
-    // Whisper cross-attention fails on fast TTS without DTW.
-    // We strictly MUST pad the start/end and slow down by 2x to give it resolution.
-    await execAsync(`ffmpeg -y -i "${audioPath}" -af "adelay=500|500,apad=pad_dur=0.5,atempo=0.5" -ar 16000 -ac 1 -c:a pcm_s16le "${tempWavPath}"`);
+    logger.info(`[WHISPER] Converting audio to 16kHz mono WAV for whisper.cpp...`);
+    // Standard 16kHz 16-bit mono PCM required by whisper.cpp
+    await execAsync(`ffmpeg -y -i "${audioPath}" -ar 16000 -ac 1 -c:a pcm_s16le "${tempWavPath}"`);
 
     logger.info(`[WHISPER] Running whisper.cpp on ${tempWavPath}...`);
     
-    // We output json to a file to avoid maxBuffer issues and noisy stdout parsing
+    // Output json to file to avoid buffer limits
     const jsonOutPath = path.resolve(__dirname, `../../output/debug_whisper_${hash}`);
     
-    // Clean quote text for bash prompt injection
+    // Clean quote text for prompt context
     const cleanPrompt = quoteText.replace(/"/g, '\\"');
     
-    // -ojf (output json full), -ml 1 forces max-len to 1 token per segment for precise word timestamps
-    // We use --prompt to guide the model. (Removed python-specific flags like --temperature)
-    const command = `"${binPath}" -m "${modelPath}" -f "${tempWavPath}" -t ${threads} -l en -nt -ojf -ml 1 --prompt "${cleanPrompt}" -of "${jsonOutPath}"`;
+    // -ojf (output full json with tokens and offsets). Note: Do NOT use -nt (it disables timestamps)
+    const command = `"${binPath}" -m "${modelPath}" -f "${tempWavPath}" -t ${threads} -l en -ojf --prompt "${cleanPrompt}" -of "${jsonOutPath}"`;
     
-    // Capture stdout/stderr just in case it fails silently again
     const { stdout, stderr } = await execAsync(command);
     
     const expectedJsonPath = `${jsonOutPath}.json`;
@@ -85,57 +82,78 @@ async function getWhisperWordTimestamps(audioPath, quoteText = "") {
     const rawData = fs.readFileSync(expectedJsonPath, "utf8");
     const parsed = JSON.parse(rawData);
 
-    // Whisper output JSON structure from -ojf typically has "transcription" -> array of segments -> array of tokens
-    // We need to flatten the tokens.
-    const words = [];
-    
+    // Extract raw non-special tokens from all segments
+    const rawTokens = [];
     if (parsed.transcription && Array.isArray(parsed.transcription)) {
       for (const segment of parsed.transcription) {
         if (segment.tokens && Array.isArray(segment.tokens)) {
           for (const token of segment.tokens) {
-             // token format usually includes text, t0 (start in 10ms units), t1 (end in 10ms units)
-             // or sometimes timestamps are in milliseconds depending on whisper.cpp version.
-             
-             let startSec = 0;
-             let endSec = 0;
-             
-             if (token.offsets && typeof token.offsets.from === 'number') {
-               startSec = token.offsets.from / 1000;
-               endSec = token.offsets.to / 1000;
-             } else if (token.t0 !== undefined) {
-               // Fallback for older formats
-               startSec = (token.t0 * 10) / 1000;
-               endSec = (token.t1 * 10) / 1000;
-             }
-             
-             // Reverse the atempo (speed up by 2x) then subtract the 500ms start padding
-             startSec = Math.max(0, (startSec * 0.5) - 0.5);
-             endSec = Math.max(0, (endSec * 0.5) - 0.5);
-             
-             const text = token.text ? token.text.trim() : "";
-             // Ignore whisper special tokens like <|endoftext|>, <|startoftranscript|>, and structural tags
-             if (text && !text.startsWith("[_") && !text.endsWith("_]") && !text.startsWith("<|") && !text.endsWith("|>")) {
-               words.push({
-                 word: text,
-                 start: startSec,
-                 end: endSec
-               });
-             }
+            let startSec = 0;
+            let endSec = 0;
+            if (token.offsets && typeof token.offsets.from === 'number') {
+              startSec = token.offsets.from / 1000;
+              endSec = token.offsets.to / 1000;
+            } else if (token.t0 !== undefined) {
+              startSec = (token.t0 * 10) / 1000;
+              endSec = (token.t1 * 10) / 1000;
+            }
+
+            const rawText = token.text || "";
+            const clean = rawText.trim();
+            // Ignore whisper special tokens
+            if (clean && !clean.startsWith("[_") && !clean.endsWith("_]") && !clean.startsWith("<|") && !clean.endsWith("|>")) {
+              rawTokens.push({
+                rawText: rawText,
+                word: clean,
+                start: startSec,
+                end: endSec
+              });
+            }
           }
         }
       }
     }
 
-    logger.info(`[WHISPER] Extracted ${words.length} tokens from whisper.cpp.`);
+    // Group BPE tokens into complete words based on leading space
+    const words = [];
+    let currentWord = null;
 
-    // If DEBUG_MODE is not true, we could clean up. But the user asked to preserve DEBUG artifacts.
+    for (let i = 0; i < rawTokens.length; i++) {
+      const t = rawTokens[i];
+      const startsWithSpace = t.rawText.startsWith(" ");
+
+      if (startsWithSpace || !currentWord) {
+        if (currentWord) words.push(currentWord);
+        currentWord = {
+          word: t.word,
+          start: t.start,
+          end: Math.max(t.end, t.start + 0.05)
+        };
+      } else {
+        // Continuation token (subword or punctuation suffix)
+        currentWord.word += t.word;
+        currentWord.end = Math.max(currentWord.end, t.end);
+      }
+    }
+    if (currentWord) words.push(currentWord);
+
+    // Bridge 0-duration words to next word start if available
+    for (let i = 0; i < words.length; i++) {
+      if (words[i].end <= words[i].start + 0.02) {
+        const nextStart = words[i + 1] ? words[i + 1].start : words[i].start + 0.15;
+        words[i].end = Math.max(words[i].start + 0.05, nextStart);
+      }
+    }
+
+    logger.info(`[WHISPER] Extracted and assembled ${words.length} words from whisper.cpp.`);
+
+    // If DEBUG_MODE is not true, clean up debug artifacts
     if (process.env.DEBUG_MODE !== "true") {
-       fs.unlinkSync(tempWavPath);
-       fs.unlinkSync(expectedJsonPath);
+      try { fs.unlinkSync(tempWavPath); } catch (e) {}
+      try { fs.unlinkSync(expectedJsonPath); } catch (e) {}
     }
 
     return words;
-
   } catch (error) {
     logger.error(`[WHISPER] Transcription failed: ${error.message}`);
     throw error;
